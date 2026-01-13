@@ -1,4 +1,7 @@
+import pickle
 import regex as re
+import time
+from tqdm import tqdm
 
 from collections import defaultdict
 
@@ -139,6 +142,10 @@ def train_bpe(
     vocab_size: int,
     special_tokens: list[str],
 ):
+    print("Start Training BPE...")
+    start_total = time.time()
+
+    print("Initialize Vocab and Merges...")
     vocab = {i:bytes([i]) for i in range(256)}
     vocab_inverse = {v:k for k,v in vocab.items()}
     # Add special tokens
@@ -150,11 +157,16 @@ def train_bpe(
     
     merges = []
 
+    print("Read Input File...")
+    t0 = time.time()
     with open(input_path, 'r', encoding='utf-8') as file:
         chunks = file.read()
+    print(f"Read Input File took {time.time() - t0:.2f}s")
 
+    t0 = time.time()
     special_pat = "|".join(re.escape(st) for st in special_tokens)
     segments = re.split(special_pat, chunks)
+    print(f"Regex Split took {time.time() - t0:.2f}s")
 
 
     token_freqs = defaultdict(int)
@@ -162,19 +174,33 @@ def train_bpe(
     pair_to_token = defaultdict(set)
     token_to_pair = defaultdict(list)
 
-    for text_segment in segments:
-
-        ## Initiate token_freqs
+    ## Initiate token_freqs
+    print("Update Token Freq...")
+    t0 = time.time()
+    for text_segment in tqdm(segments, desc="Token Freqs"):
         update_token_freqs(text_segment, token_freqs)
+    print(f"Update Token Freq took {time.time() - t0:.2f}s")
 
-    # Initiate pair_freqs, pair_to_token, and token_to_pair
+    ## Initiate pair_freqs, pair_to_token, and token_to_pair
+    print("Update Pair Freq...")
+    t0 = time.time()
     update_pair_freqs(token_freqs, pair_freqs)
+    print(f"Update Pair Freq took {time.time() - t0:.2f}s")
+
+    print("Update Pair to Token...")
+    t0 = time.time()
     update_pair2token(token_freqs, pair_to_token)
+    print(f"Update Pair to Token took {time.time() - t0:.2f}s")
+
+    print("Update Token to Pair...")
+    t0 = time.time()
     update_token2pair(token_freqs, token_to_pair)
+    print(f"Update Token to Pair took {time.time() - t0:.2f}s")
 
-
+    print("Start Merging...")
+    t0 = time.time()
     num_merges = vocab_size - 256 - len(special_tokens)
-    for i in range(num_merges):
+    for i in tqdm(range(num_merges), desc="Merging"):
         ### find most frequent pair
         if not pair_freqs:
             break
@@ -192,19 +218,29 @@ def train_bpe(
         update_merges(best_pair, merges)
 
         update_all(best_pair, pair_to_token, token_to_pair, token_freqs, pair_freqs)
-
-    
+    print(f"Merging took {time.time() - t0:.2f}s")
+    print(f"Total Training took {time.time() - start_total:.2f}s")
 
     return vocab, merges
     
 
 if __name__ == "__main__":
 
-    input_path: str = "data/TinyStoriesV2-GPT4-valid.txt"
-    vocab_size: int = 260
-    special_tokens: list[str] = ['<|endoftext|>']
+    data_group = "train"
+    file_name = f"TinyStoriesV2-GPT4-{data_group}.txt"
+    input_path = f"data/{file_name}"
+    vocab_size = 260
+    special_tokens = ['<|endoftext|>']
+
+    
+
+    vocab_path = f"outputs/{file_name.split(".")[0]}-vocab.pkl"
+    merges_path = f"outputs/{file_name.split(".")[0]}-merge.pkl"
 
 
     vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
         
-    print(merges)
+    with open(vocab_path, 'wb') as f:
+        pickle.dump(vocab, f)
+    with open(merges_path, 'wb') as f:
+        pickle.dump(merges, f)
