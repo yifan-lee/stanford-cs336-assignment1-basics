@@ -9,12 +9,14 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
+from cs336_basics.bpe_tokenize import train_bpe
+
 
 def run_linear(
     d_in: int,
     d_out: int,
     weights: Float[Tensor, " d_out d_in"],
-    in_features: Float[Tensor, " ... d_in"],
+    in_features: Float[Tensor, " ... d_in"]
 ) -> Float[Tensor, " ... d_out"]:
     """
     Given the weights of a Linear layer, compute the transformation of a batched input.
@@ -36,7 +38,7 @@ def run_embedding(
     vocab_size: int,
     d_model: int,
     weights: Float[Tensor, " vocab_size d_model"],
-    token_ids: Int[Tensor, " ..."],
+    token_ids: Int[Tensor, " ..."]
 ) -> Float[Tensor, " ... d_model"]:
     """
     Given the weights of an Embedding layer, get the embeddings for a batch of token ids.
@@ -60,7 +62,7 @@ def run_swiglu(
     w1_weight: Float[Tensor, " d_ff d_model"],
     w2_weight: Float[Tensor, " d_model d_ff"],
     w3_weight: Float[Tensor, " d_ff d_model"],
-    in_features: Float[Tensor, " ... d_model"],
+    in_features: Float[Tensor, " ... d_model"]
 ) -> Float[Tensor, " ... d_model"]:
     """Given the weights of a SwiGLU network, return
     the output of your implementation with these weights.
@@ -90,7 +92,7 @@ def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
     K: Float[Tensor, " ... keys d_k"],
     V: Float[Tensor, " ... values d_v"],
-    mask: Bool[Tensor, " ... queries keys"] | None = None,
+    mask: Bool[Tensor, " ... queries keys"] | None = None
 ) -> Float[Tensor, " ... queries d_v"]:
     """
     Given key (K), query (Q), and value (V) tensors, return
@@ -114,7 +116,7 @@ def run_multihead_self_attention(
     k_proj_weight: Float[Tensor, " d_k d_in"],
     v_proj_weight: Float[Tensor, " d_v d_in"],
     o_proj_weight: Float[Tensor, " d_model d_v"],
-    in_features: Float[Tensor, " ... sequence_length d_in"],
+    in_features: Float[Tensor, " ... sequence_length d_in"]
 ) -> Float[Tensor, " ... sequence_length d_out"]:
     """
     Given the key, query, and value projection weights of a naive unbatched
@@ -151,7 +153,7 @@ def run_multihead_self_attention_with_rope(
     v_proj_weight: Float[Tensor, " d_v d_in"],
     o_proj_weight: Float[Tensor, " d_model d_v"],
     in_features: Float[Tensor, " ... sequence_length d_in"],
-    token_positions: Int[Tensor, " ... sequence_length"] | None = None,
+    token_positions: Int[Tensor, " ... sequence_length"] | None = None
 ) -> Float[Tensor, " ... sequence_length d_out"]:
     """
     Given the key, query, and value projection weights of a naive unbatched
@@ -186,7 +188,7 @@ def run_rope(
     theta: float,
     max_seq_len: int,
     in_query_or_key: Float[Tensor, " ... sequence_length d_k"],
-    token_positions: Int[Tensor, " ... sequence_length"],
+    token_positions: Int[Tensor, " ... sequence_length"]
 ) -> Float[Tensor, " ... sequence_length d_k"]:
     """
     Run RoPE for a given input tensor.
@@ -210,7 +212,7 @@ def run_transformer_block(
     max_seq_len: int,
     theta: float,
     weights: dict[str, Tensor],
-    in_features: Float[Tensor, " batch sequence_length d_model"],
+    in_features: Float[Tensor, " batch sequence_length d_model"]
 ) -> Float[Tensor, " batch sequence_length d_model"]:
     """
     Given the weights of a pre-norm Transformer block and input features,
@@ -285,7 +287,7 @@ def run_transformer_lm(
     d_ff: int,
     rope_theta: float,
     weights: dict[str, Tensor],
-    in_indices: Int[Tensor, " batch_size sequence_length"],
+    in_indices: Int[Tensor, " batch_size sequence_length"]
 ) -> Float[Tensor, " batch_size sequence_length vocab_size"]:
     """Given the weights of a Transformer language model and input indices,
     return the output of running a forward pass on the input indices.
@@ -362,7 +364,7 @@ def run_rmsnorm(
     d_model: int,
     eps: float,
     weights: Float[Tensor, " d_model"],
-    in_features: Float[Tensor, " ... d_model"],
+    in_features: Float[Tensor, " ... d_model"]
 ) -> Float[Tensor, " ... d_model"]:
     """Given the weights of a RMSNorm affine transform,
     return the output of running RMSNorm on the input features.
@@ -566,7 +568,7 @@ def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
     special_tokens: list[str],
-    **kwargs,
+    **kwargs
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """Given the path to an input corpus, run train a BPE tokenizer and
     output its vocabulary and merges.
@@ -589,4 +591,6 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+
+    vocab, merges = train_bpe(str(input_path), vocab_size, special_tokens)
+    return vocab, merges
