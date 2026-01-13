@@ -1,15 +1,67 @@
+import os
 import pickle
-import regex as re
 import time
-from tqdm import tqdm
 
+import regex as re
+
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
+from typing import BinaryIO
 from collections import defaultdict
+
+
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 TOKEN = tuple[bytes]
 PAIR = tuple[bytes, bytes]
 
+
+def find_chunk_boundaries(
+    file: BinaryIO,
+    desired_num_chunks: int,
+    split_special_token: bytes,
+) -> list[int]:
+    """
+    Chunk the file into parts that can be counted independently.
+    May return fewer chunks if the boundaries end up overlapping.
+    """
+    assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
+
+    # Get total file size in bytes
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+
+    chunk_size = file_size // desired_num_chunks
+
+    # Initial guesses for chunk boundary locations, uniformly spaced
+    # Chunks start on previous index, don't include last index
+    chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
+    chunk_boundaries[-1] = file_size
+
+    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+
+    for bi in range(1, len(chunk_boundaries) - 1):
+        initial_position = chunk_boundaries[bi]
+        file.seek(initial_position)  # Start at boundary guess
+        while True:
+            mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+
+            # If EOF, this boundary should be at the end of the file
+            if mini_chunk == b"":
+                chunk_boundaries[bi] = file_size
+                break
+
+            # Find the special token in the mini chunk
+            found_at = mini_chunk.find(split_special_token)
+            if found_at != -1:
+                chunk_boundaries[bi] = initial_position + found_at
+                break
+            initial_position += mini_chunk_size
+
+    # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
+    return sorted(set(chunk_boundaries))
 
 def update_token_freqs(
     text_segment: str,
@@ -20,6 +72,27 @@ def update_token_freqs(
         token = m.group()
         token_bytes = tuple(bytes([b]) for b in token.encode("utf-8"))
         token_freqs[token_bytes] += 1 
+
+def process_chunk(args):
+    input_path, start, end, special_tokens, chunk_id = args
+    # Read chunk
+    with open(input_path, 'rb') as f:
+        f.seek(start)
+        chunk_bytes = f.read(end - start)
+    
+    # Decode
+    chunk_str = chunk_bytes.decode("utf-8", errors="ignore")
+    
+    # Logic from original train_bpe
+    special_pat = "|".join(re.escape(st) for st in special_tokens)
+    segments = re.split(special_pat, chunk_str)
+    
+    token_freqs = defaultdict(int)
+    # Use position=chunk_id+1 so 0 is left for the main bar
+    for seg in tqdm(segments, position=chunk_id + 1, desc=f"Chunk {chunk_id}", leave=False):
+        update_token_freqs(seg, token_freqs)
+    
+    return token_freqs
 
 def get_pairs(
     token: TOKEN
@@ -141,6 +214,7 @@ def train_bpe(
     input_path: str,
     vocab_size: int,
     special_tokens: list[str],
+    num_processes: int = 16
 ):
     print("Start Training BPE...")
     start_total = time.time()
@@ -157,29 +231,38 @@ def train_bpe(
     
     merges = []
 
-    print("Read Input File...")
+    print("Calculating chunk boundaries...")
     t0 = time.time()
-    with open(input_path, 'r', encoding='utf-8') as file:
-        chunks = file.read()
-    print(f"Read Input File took {time.time() - t0:.2f}s")
-
-    t0 = time.time()
-    special_pat = "|".join(re.escape(st) for st in special_tokens)
-    segments = re.split(special_pat, chunks)
-    print(f"Regex Split took {time.time() - t0:.2f}s")
-
-
+    with open(input_path, 'rb') as f:
+        # Assuming first special token is the split token
+        split_token = special_tokens[0].encode("utf-8") if special_tokens else b"<|endoftext|>"
+        boundaries = find_chunk_boundaries(f, num_processes, split_token) # More chunks than processes for load balancing
+    print(f"Boundaries calculated in {time.time() - t0:.2f}s")
+    
     token_freqs = defaultdict(int)
+
+    ## Initiate token_freqs
+    print("Update Token Freq (Parallel)...")
+    t0 = time.time()
+    
+    tasks = []
+    for i in range(len(boundaries) - 1):
+        start = boundaries[i]
+        end = boundaries[i+1]
+        tasks.append((input_path, start, end, special_tokens, i))
+    
+    with ProcessPoolExecutor(max_workers=num_processes) as executor:
+        results = list(tqdm(executor.map(process_chunk, tasks), total=len(tasks), desc="Token Freqs (Chunks)", position=0))
+        
+        for local_freqs in results:
+            for token, count in local_freqs.items():
+                token_freqs[token] += count
+                
+    print(f"Update Token Freq took {time.time() - t0:.2f}s")
+
     pair_freqs = defaultdict(int)
     pair_to_token = defaultdict(set)
     token_to_pair = defaultdict(list)
-
-    ## Initiate token_freqs
-    print("Update Token Freq...")
-    t0 = time.time()
-    for text_segment in tqdm(segments, desc="Token Freqs"):
-        update_token_freqs(text_segment, token_freqs)
-    print(f"Update Token Freq took {time.time() - t0:.2f}s")
 
     ## Initiate pair_freqs, pair_to_token, and token_to_pair
     print("Update Pair Freq...")
@@ -229,7 +312,7 @@ if __name__ == "__main__":
     data_group = "train"
     file_name = f"TinyStoriesV2-GPT4-{data_group}.txt"
     input_path = f"data/{file_name}"
-    vocab_size = 260
+    vocab_size = 300
     special_tokens = ['<|endoftext|>']
 
     
