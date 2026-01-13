@@ -139,9 +139,16 @@ def train_bpe(
     vocab_size: int,
     special_tokens: list[str],
 ):
-    vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)}
-    vocab_inverse: dict[int, bytes] = {v:k for k,v in vocab.items()}
-    merges: list[tuple[bytes, bytes]] = []
+    vocab = {i:bytes([i]) for i in range(256)}
+    vocab_inverse = {v:k for k,v in vocab.items()}
+    # Add special tokens
+    for st in special_tokens:
+        new_id = len(vocab)
+        st_bytes = st.encode("utf-8")
+        vocab[new_id] = st_bytes
+        vocab_inverse[st_bytes] = new_id
+    
+    merges = []
 
     with open(input_path, 'r', encoding='utf-8') as file:
         chunks = file.read()
@@ -166,9 +173,14 @@ def train_bpe(
     update_token2pair(token_freqs, token_to_pair)
 
 
-    for new_id in range(256, vocab_size):
+    num_merges = vocab_size - 256 - len(special_tokens)
+    for i in range(num_merges):
         ### find most frequent pair
+        if not pair_freqs:
+            break
         best_pair = get_most_frequent_pair(pair_freqs)
+
+        new_id = len(vocab)
 
         ## update vocab
         update_vocab(new_id, best_pair, vocab)
@@ -180,6 +192,8 @@ def train_bpe(
         update_merges(best_pair, merges)
 
         update_all(best_pair, pair_to_token, token_to_pair, token_freqs, pair_freqs)
+
+    
 
     return vocab, merges
     
