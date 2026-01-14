@@ -3,6 +3,7 @@ import pickle
 import time
 
 import regex as re
+import numpy as np
 
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
@@ -306,31 +307,163 @@ def train_bpe(
     print(f"Total Training took {time.time() - start_total:.2f}s")
 
     return vocab, merges
+
+class Tokenizer():
+    def __init__(
+        self, 
+        vocab: dict[int, bytes], 
+        merges: list[PAIR],
+        special_tokens: list[str] | None = None,
+    ):
+        self.vocab = vocab
+        self.merges = merges
+        
+        if special_tokens:
+            new_index = len(vocab)
+            for st in special_tokens:
+                if st != END_TOKEN:
+                    vocab[new_index] = st
+                    new_index += 1
+            self.special_tokens =  sorted(list(set([END_TOKEN]+special_tokens)), key=len, reverse=True)
+        else:
+            self.special_tokens = [END_TOKEN]
+
+        self.vocab_inverse = {v: k for k, v in vocab.items()}
+        self.merges_to_rank = {m: i for i, m in enumerate(merges)}
+
+    @classmethod
+    def from_files(
+        cls, 
+        vocab_filepath: str, 
+        merges_filepath: str, 
+        special_tokens: list[str] | None = None,
+    ) :
+        with open(vocab_filepath, "rb") as f:
+            vocab = pickle.load(f)
+        with open(merges_filepath, "rb") as f:
+            merges = pickle.load(f)
+        return cls(vocab, merges, special_tokens=special_tokens)
+
+    def merge_tokens(self, token_bytes: list[bytes]) -> list[bytes]:
+        if len(token_bytes) <= 1:
+            return token_bytes
+        if token_bytes in self.special_tokens:
+            return token_bytes
+        while 1:
+            merge_position = -1
+            smallest_rank = len(self.merges)
+            for i in range(len(token_bytes)-1):
+                current_pair = (token_bytes[i], token_bytes[i+1])
+                rank = self.merges_to_rank.get(current_pair, -1)
+                if rank == -1:
+                    continue
+                if rank < smallest_rank:
+                    smallest_rank = rank
+                    merge_position = i
+            if merge_position == -1:
+                break
+            token_bytes = token_bytes[:(merge_position)] + [token_bytes[merge_position]+token_bytes[merge_position+1]]+token_bytes[(merge_position+2):]
+        return token_bytes
+
+    def encode(self, text: str) -> list[int]:
+        special_pat = "("+"|".join(re.escape(st) for st in self.special_tokens)+")"
+        segments = re.split(special_pat, text)
+        ids = []
+        for segment in segments:
+            if not segment:
+                continue
+            if segment in self.special_tokens:
+                token_bytes = self.transfer_text2bytes(segment)
+                token_bytes = self.merge_tokens(token_bytes)
+                encoded_token = []
+                for i in token_bytes:
+                    encoded_token.append(self.vocab_inverse[i])
+                ids.extend(encoded_token)
+                continue
+            matches = re.finditer(PAT, segment)
+            for m in matches:
+                token = m.group()
+                token_bytes = self.transfer_text2bytes(token)
+                token_bytes = self.merge_tokens(token_bytes)
+                encoded_token = []
+                for i in token_bytes:
+                    encoded_token.append(self.vocab_inverse[i])
+                ids.extend(encoded_token)
+        return ids
+
+    def _encode_batch(self, texts: list[str]) -> list[list[int]]:
+        return [self.encode(text) for text in texts]
+
+    def encode_iterable(self, iterable: Iterable[str], num_processes: int = 4, batch_size: int = 1000) -> Iterator[int]:
+        with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            def batch_generator():
+                current_batch = []
+                for text in iterable:
+                    current_batch.append(text)
+                    if len(current_batch) >= batch_size:
+                        yield current_batch
+                        current_batch = []
+                if current_batch:
+                    yield current_batch
+            # 在 with 块内部进行 map 和 yield
+            for batch_results in executor.map(self._encode_batch, batch_generator()):
+                for seq in batch_results:
+                    yield from seq
+
+    def decode(self, ids: list[int]) -> str:
+        unk_bytes = '\ufffd'.encode('utf-8')
+        bytes_list = [self.vocab.get(i, unk_bytes) for i in ids]
+        return b"".join(bytes_list).decode("utf-8", errors="replace")
+
+    def transfer_text2bytes(self, segment: str) -> list[bytes]:
+        if segment in self.special_tokens:
+            return [segment.encode("utf-8")]
+        token_bytes = list(bytes([b]) for b in segment.encode("utf-8"))
+        return token_bytes
+
     
 
 if __name__ == "__main__":
 
-    data_group = "train"
-    # file_name = f"TinyStoriesV2-GPT4-{data_group}.txt"
-    file_name = f"owt_{data_group}.txt"
+    data_group = "valid"
+    file_name = f"TinyStoriesV2-GPT4-{data_group}.txt"
+    # file_name = f"owt_{data_group}.txt"
     input_path = f"data/{file_name}"
-    vocab_size = 32000
+    vocab_size = 10000
     special_tokens = [END_TOKEN]
 
-    
-
-    vocab_path = f"outputs/{file_name.split(".")[0]}-vocab-{vocab_size}.pkl"
-    merges_path = f"outputs/{file_name.split(".")[0]}-merge-{vocab_size}.pkl"
+    vocab_filepath = f"outputs/{file_name.split(".")[0]}-vocab-{vocab_size}.pkl"
+    merges_filepath = f"outputs/{file_name.split(".")[0]}-merge-{vocab_size}.pkl"
 
 
-    vocab, merges = train_bpe(input_path, vocab_size, special_tokens,num_processes=16)
+    # vocab, merges = train_bpe(input_path, vocab_size, special_tokens,num_processes=16)
         
-    longest_values = sorted(vocab.values(), key=len, reverse=True)[:30]
+    # longest_values = sorted(vocab.values(), key=len, reverse=True)[:30]
 
-    for val in longest_values:
-        print(f"Bytes: {val} | Size: {len(val)}")
+    # for val in longest_values:
+    #     print(f"Bytes: {val} | Size: {len(val)}")
     
-    with open(vocab_path, 'wb') as f:
-        pickle.dump(vocab, f)
-    with open(merges_path, 'wb') as f:
-        pickle.dump(merges, f)
+    # with open(vocab_filepath, 'wb') as f:
+    #     pickle.dump(vocab, f)
+    # with open(merges_filepath, 'wb') as f:
+    #     pickle.dump(merges, f)
+
+    encoded_text_filepath =  f"outputs/{file_name.split(".")[0]}.bin"
+
+    tokenizer = Tokenizer.from_files(vocab_filepath,merges_filepath,special_tokens)
+
+    with open(input_path, "r", encoding="utf-8") as f_in:
+        with open(encoded_text_filepath, "wb") as f_out:
+            
+            chunk_buffer = []
+            write_frequency = 100000 
+            
+            for token_id in tqdm(tokenizer.encode_iterable(f_in, num_processes=16), desc="Encoding"):
+                chunk_buffer.append(token_id)
+                
+                if len(chunk_buffer) >= write_frequency:
+                    np.array(chunk_buffer, dtype=np.uint16).tofile(f_out)
+                    chunk_buffer = []
+            
+            if chunk_buffer:
+                np.array(chunk_buffer, dtype=np.uint16).tofile(f_out)
