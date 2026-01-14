@@ -8,6 +8,7 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 from typing import BinaryIO
 from collections import defaultdict
+from collections.abc import Iterable, Iterator
 
 
 
@@ -15,6 +16,7 @@ from collections import defaultdict
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 TOKEN = tuple[bytes]
 PAIR = tuple[bytes, bytes]
+END_TOKEN = '<|endoftext|>'
 
 
 def find_chunk_boundaries(
@@ -313,7 +315,7 @@ if __name__ == "__main__":
     file_name = f"owt_{data_group}.txt"
     input_path = f"data/{file_name}"
     vocab_size = 32000
-    special_tokens = ['<|endoftext|>']
+    special_tokens = [END_TOKEN]
 
     
 
