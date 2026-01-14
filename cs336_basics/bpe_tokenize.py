@@ -89,7 +89,7 @@ def process_chunk(args):
     
     token_freqs = defaultdict(int)
     # Use position=chunk_id+1 so 0 is left for the main bar
-    for seg in tqdm(segments, position=chunk_id + 1, desc=f"Chunk {chunk_id}", leave=False):
+    for seg in segments:
         update_token_freqs(seg, token_freqs)
     
     return token_freqs
@@ -214,7 +214,7 @@ def train_bpe(
     input_path: str,
     vocab_size: int,
     special_tokens: list[str],
-    num_processes: int = 16
+    num_processes: int = 4
 ):
     print("Start Training BPE...")
     start_total = time.time()
@@ -310,19 +310,25 @@ def train_bpe(
 if __name__ == "__main__":
 
     data_group = "train"
-    file_name = f"TinyStoriesV2-GPT4-{data_group}.txt"
+    # file_name = f"TinyStoriesV2-GPT4-{data_group}.txt"
+    file_name = f"owt_{data_group}.txt"
     input_path = f"data/{file_name}"
-    vocab_size = 300
+    vocab_size = 32000
     special_tokens = ['<|endoftext|>']
 
     
 
-    vocab_path = f"outputs/{file_name.split(".")[0]}-vocab.pkl"
-    merges_path = f"outputs/{file_name.split(".")[0]}-merge.pkl"
+    vocab_path = f"outputs/{file_name.split(".")[0]}-vocab-{vocab_size}.pkl"
+    merges_path = f"outputs/{file_name.split(".")[0]}-merge-{vocab_size}.pkl"
 
 
-    vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
+    vocab, merges = train_bpe(input_path, vocab_size, special_tokens,num_processes=16)
         
+    longest_values = sorted(vocab.values(), key=len, reverse=True)[:10]
+
+    for val in longest_values:
+        print(f"Bytes: {val} | Size: {len(val)}")
+    
     with open(vocab_path, 'wb') as f:
         pickle.dump(vocab, f)
     with open(merges_path, 'wb') as f:
