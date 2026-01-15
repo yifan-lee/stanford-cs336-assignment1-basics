@@ -14,6 +14,7 @@ from cs336_basics.transformer import (
     Linear,
     Embedding,
     RMSNorm,
+    SwiGLU,
 )
 
 
@@ -94,7 +95,12 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+
+    model = SwiGLU(d_model,d_ff)
+    model.w1_weight.load_state_dict({"weights":w1_weight})
+    model.w2_weight.load_state_dict({"weights":w2_weight})
+    model.w3_weight.load_state_dict({"weights":w3_weight})
+    return model(in_features)
 
 
 def run_scaled_dot_product_attention(
