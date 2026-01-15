@@ -394,7 +394,7 @@ class Tokenizer():
     def _encode_batch(self, texts: list[str]) -> list[list[int]]:
         return [self.encode(text) for text in texts]
 
-    def encode_iterable(self, iterable: Iterable[str], num_processes: int = 4, batch_size: int = 1000) -> Iterator[int]:
+    def encode_iterable(self, iterable: Iterable[str], num_processes: int = 4, batch_size: int = 1000, total_lines: int = None) -> Iterator[int]:
         with ProcessPoolExecutor(max_workers=num_processes) as executor:
             def batch_generator():
                 current_batch = []
@@ -405,8 +405,11 @@ class Tokenizer():
                         current_batch = []
                 if current_batch:
                     yield current_batch
-            # 在 with 块内部进行 map 和 yield
-            for batch_results in executor.map(self._encode_batch, batch_generator()):
+
+            total_batches = (total_lines + batch_size - 1) // batch_size if total_lines else None
+                    
+            results = executor.map(self._encode_batch, batch_generator())
+            for batch_results in tqdm(results, total=total_batches, desc="Encoding (Batches)"):
                 for seq in batch_results:
                     yield from seq
 
@@ -425,15 +428,18 @@ class Tokenizer():
 
 if __name__ == "__main__":
 
-    data_group = "valid"
-    file_name = f"TinyStoriesV2-GPT4-{data_group}.txt"
-    # file_name = f"owt_{data_group}.txt"
-    input_path = f"data/{file_name}"
-    vocab_size = 10000
+    start_total = time.time()
+
+    data_group = "train"
+    # file_name_prefix = f"TinyStoriesV2-GPT4-"
+    file_name_prefix = f"owt_"
+    input_path = f"data/{file_name_prefix}{data_group}.txt"
+    # vocab_size = 10000
+    vocab_size = 32000
     special_tokens = [END_TOKEN]
 
-    vocab_filepath = f"outputs/{file_name.split(".")[0]}-vocab-{vocab_size}.pkl"
-    merges_filepath = f"outputs/{file_name.split(".")[0]}-merge-{vocab_size}.pkl"
+    vocab_filepath = f"outputs/{file_name_prefix}train-vocab-{vocab_size}.pkl"
+    merges_filepath = f"outputs/{file_name_prefix}train-merge-{vocab_size}.pkl"
 
 
     # vocab, merges = train_bpe(input_path, vocab_size, special_tokens,num_processes=16)
@@ -448,18 +454,27 @@ if __name__ == "__main__":
     # with open(merges_filepath, 'wb') as f:
     #     pickle.dump(merges, f)
 
-    encoded_text_filepath =  f"outputs/{file_name.split(".")[0]}.bin"
+    encoded_text_filepath =  f"outputs/{file_name_prefix}{data_group}.bin"
 
     tokenizer = Tokenizer.from_files(vocab_filepath,merges_filepath,special_tokens)
+
+    t0 = time.time()
+    print(f"Counting lines in {input_path}...")
+    with open(input_path, 'r', encoding='utf-8') as f:
+        total_lines = sum(1 for _ in f)
+
+    print(f"Counting lines took {time.time() - t0:.2f}s")
 
     with open(input_path, "r", encoding="utf-8") as f_in:
         with open(encoded_text_filepath, "wb") as f_out:
             
             chunk_buffer = []
             write_frequency = 100000 
+            # token_count = 0
             
-            for token_id in tqdm(tokenizer.encode_iterable(f_in, num_processes=16), desc="Encoding"):
+            for token_id in tokenizer.encode_iterable(f_in, num_processes=16, total_lines=total_lines):
                 chunk_buffer.append(token_id)
+                # token_count += 1
                 
                 if len(chunk_buffer) >= write_frequency:
                     np.array(chunk_buffer, dtype=np.uint16).tofile(f_out)
@@ -467,3 +482,13 @@ if __name__ == "__main__":
             
             if chunk_buffer:
                 np.array(chunk_buffer, dtype=np.uint16).tofile(f_out)
+
+    print(f"Total Training took {time.time() - start_total:.2f}s")
+    # print(f"Done! Encoded {total_lines} lines into {token_count} tokens.")
+
+
+
+    # # 使用 numpy 从二进制文件直接读取
+    # data = np.fromfile("dataset.bin", dtype=np.uint16)
+    # # 或者为了极速训练，使用内存映射（不占内存，按需读取）
+    # data_mmap = np.memmap("dataset.bin", dtype=np.uint16, mode="r")
