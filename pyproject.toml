@@ -55,3 +55,7 @@ extend-select = ["UP"]
 ignore = [
     "F722"
 ]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+disableTypeErrors = false
