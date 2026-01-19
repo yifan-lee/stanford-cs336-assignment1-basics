@@ -128,3 +128,51 @@ class SwiGLU(nn.Module):
         x1_silu_x3 = x1_silu*x3
         result = self.w2_weight(x1_silu_x3)
         return result
+
+class RotaryPositionalEmbedding(nn.Module):
+    def __init__(
+        self, 
+        theta: float, 
+        d_k: int, 
+        max_seq_len: int,
+        device: torch.device | None = None, 
+    ):
+        super().__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+        self.device = device
+
+        dim_index = torch.arange(self.d_k // 2, device=self.device, dtype=torch.float32)
+        position_index = torch.arange(self.max_seq_len, device=self.device, dtype=torch.float32)
+        theta_inv_index = self.theta**(-2*dim_index/d_k)
+        theta_ik = einsum(
+            position_index, theta_inv_index,
+            "s, d -> s d"
+        )
+
+
+        sin = torch.sin(theta_ik)
+        cos = torch.cos(theta_ik)
+        
+        self.register_buffer("sin", sin, persistent=False)
+        self.register_buffer("cos", cos, persistent=False)
+    
+    def forward(
+        self, x: torch.Tensor,
+        toke_position: torch.Tensor,
+    ) -> torch.Tensor:
+        x_even = x[...,::2]
+        x_odd = x[...,1::2]
+
+        sin_expend = self.sin[toke_position]
+        cos_expend = self.cos[toke_position]
+
+        x_even_new = x_even*cos_expend-x_odd*sin_expend
+        x_odd_new = x_even*sin_expend+x_odd*cos_expend
+
+        x_rope = rearrange(
+            torch.stack([x_even_new,x_odd_new], dim=-1),
+            '... seq_len d_k two -> ... seq_len (d_k two)',
+        )
+        return x_rope
