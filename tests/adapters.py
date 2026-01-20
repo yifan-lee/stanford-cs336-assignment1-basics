@@ -23,6 +23,10 @@ from cs336_basics.transformer import (
     TransformerLM
 )
 
+from cs336_basics.model_trainning import (
+    cross_entropy,
+)
+
 
 def run_linear(
     d_in: int,
@@ -525,7 +529,7 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    return cross_entropy(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
