@@ -267,13 +267,15 @@ class MultiheadSelfAttention(nn.Module):
         )
         V = rearrange(
             V,
-            "batch seq (num_heads d_v) -> batch num_heads seq d_v",
+            "... seq (num_heads d_v) -> ... num_heads seq d_v",
             num_heads=self.num_heads
         )
 
-        
-        
-        if (self.rope is not None) and (token_position is not None):
+        if (self.rope is not None):
+            if token_position is None:
+                token_position = torch.arange(seq_len, device=self.device)
+                position_expend_shape = (Q.shape[:-1])
+                token_position = token_position.expand(position_expend_shape)
             Q = self.rope(Q, token_position)
             K = self.rope(K, token_position)
 
@@ -285,4 +287,45 @@ class MultiheadSelfAttention(nn.Module):
         attention = self.W_O(QKV_reshape)
         return attention
 
+
+class Transformer(nn.Module):
+    def __init__(
+        self, 
+        d_model: int, 
+        num_heads: int, 
+        d_ff: int,
+        eps: float = 1e-5, 
+        theta: float|None=None,
+        max_seq_len:int|None=None,
+        device: torch.device | None = None, 
+        dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.eps = eps
+        self.theta = theta
+        self.max_seq_len = max_seq_len
+        self.device = device
+        self.dtype = dtype
+
+        self.multihead_attention = MultiheadSelfAttention(
+            d_model,num_heads,theta,max_seq_len,device,dtype
+        )
+        self.rms_norm1 = RMSNorm(d_model,eps,device,dtype)
+        self.rms_norm2 = RMSNorm(d_model,eps,device,dtype)
+        self.swi_glu = SwiGLU(d_model,d_ff,device,dtype)
+
+    def forward(
+        self, x: torch.Tensor,
+        token_position: torch.Tensor|None=None,
+    ) -> torch.Tensor:
+        x_norm = self.rms_norm1(x)
+        x_attention = self.multihead_attention(x_norm, token_position)
+        x2 = x + x_attention
+        x2_norm = self.rms_norm2(x2)
+        x2_glu = self.swi_glu(x2_norm)
+        x3 = x2 + x2_glu
+        return x3
 

@@ -18,7 +18,8 @@ from cs336_basics.transformer import (
     RotaryPositionalEmbedding,
     softmax,
     scaled_dot_product_attention,
-    MultiheadSelfAttention
+    MultiheadSelfAttention,
+    Transformer
 )
 
 
@@ -305,7 +306,23 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    model = Transformer(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        theta=theta,
+        max_seq_len=max_seq_len
+    )
+    model.multihead_attention.W_Q.load_state_dict({'weights': weights['attn.q_proj.weight']})
+    model.multihead_attention.W_K.load_state_dict({'weights': weights['attn.k_proj.weight']})
+    model.multihead_attention.W_V.load_state_dict({'weights': weights['attn.v_proj.weight']})
+    model.multihead_attention.W_O.load_state_dict({'weights': weights['attn.output_proj.weight']})
+    model.rms_norm1.load_state_dict({'weights': weights['ln1.weight']})
+    model.rms_norm2.load_state_dict({'weights': weights['ln2.weight']})
+    model.swi_glu.w1_weight.load_state_dict({'weights': weights['ffn.w1.weight']})
+    model.swi_glu.w2_weight.load_state_dict({'weights': weights['ffn.w2.weight']})
+    model.swi_glu.w3_weight.load_state_dict({'weights': weights['ffn.w3.weight']})
+    return model(in_features)
 
 
 def run_transformer_lm(
