@@ -136,6 +136,7 @@ class RotaryPositionalEmbedding(nn.Module):
         d_k: int, 
         max_seq_len: int,
         device: torch.device | None = None, 
+        dtype: torch.dtype | None = None
     ):
         super().__init__()
         self.theta = theta
@@ -160,13 +161,13 @@ class RotaryPositionalEmbedding(nn.Module):
     
     def forward(
         self, x: torch.Tensor,
-        toke_position: torch.Tensor,
+        token_position: torch.Tensor,
     ) -> torch.Tensor:
         x_even = x[...,::2]
         x_odd = x[...,1::2]
 
-        sin_expend = self.sin[toke_position]
-        cos_expend = self.cos[toke_position]
+        sin_expend = self.sin[token_position]
+        cos_expend = self.cos[token_position]
 
         x_even_new = x_even*cos_expend-x_odd*sin_expend
         x_odd_new = x_even*sin_expend+x_odd*cos_expend
@@ -185,3 +186,103 @@ def softmax(
     x_exp = torch.exp(x-max_values)
     x_rxp_sum = torch.sum(x_exp, dim=dimension, keepdim=True)
     return x_exp/x_rxp_sum
+
+
+def scaled_dot_product_attention(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    V: torch.Tensor,
+    mask: torch.Tensor | None = None,
+):
+    d_k = Q.shape[-1]
+    QK= einsum(
+        Q, K,
+        "batch ... seq_n d_k,  batch ... seq_m d_k -> batch ... seq_n seq_m"
+    )
+    QK_scaled = QK/torch.tensor(d_k).sqrt()
+    if mask is not None:
+        M = torch.where(mask, torch.tensor(0.0), torch.tensor(float('-inf')))
+        QK_scaled += M
+    QK_scaled_softmax = softmax(QK_scaled, Q.dim()-1)
+    result = einsum(
+        QK_scaled_softmax, V,
+        "batch ... seq_n seq_m, batch ... seq_m d_v -> batch ... seq_n d_v"
+    )
+    return result
+
+
+class MultiheadSelfAttention(nn.Module):
+    def __init__(
+        self, 
+        d_model: int, 
+        num_heads: int, 
+        theta: float|None=None,
+        max_seq_len:int|None=None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.theta = theta
+        self.max_seq_len = max_seq_len
+        self.device = device
+
+        self.rope = None
+        self.d_k = d_model//num_heads
+        self.d_v = d_model//num_heads
+
+        self.W_Q = Linear(d_model, num_heads*self.d_k,device,dtype)
+        self.W_K = Linear(d_model, num_heads*self.d_k,device,dtype)
+        self.W_V = Linear(d_model, num_heads*self.d_v,device,dtype)
+        self.W_O = Linear(num_heads*self.d_v, d_model,device,dtype)
+
+        # mask = torch.triu(torch.ones(max_seq_len, max_seq_len, device=device), diagonal=1).bool()
+        # self.register_buffer("causal_mask", mask)
+
+        if (theta is not None) and (max_seq_len is not None):
+            self.rope = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len,device,dtype)
+
+    def forward(
+        self, 
+        x: torch.Tensor,
+        token_position: torch.Tensor|None=None,
+    ) -> torch.Tensor:
+        seq_len = x.shape[-2]
+        mask = torch.tril(torch.ones(seq_len, seq_len, device=self.device,dtype=torch.bool))
+        # mask = None
+        Q = self.W_Q(x)
+        K = self.W_K(x)
+        V = self.W_V(x)
+
+        Q = rearrange(
+            Q,
+            "... seq (num_heads d_k) -> ... num_heads seq d_k",
+            num_heads=self.num_heads
+        )
+        K = rearrange(
+            K,
+            "... seq (num_heads d_k) -> ... num_heads seq d_k",
+            num_heads=self.num_heads
+        )
+        V = rearrange(
+            V,
+            "batch seq (num_heads d_v) -> batch num_heads seq d_v",
+            num_heads=self.num_heads
+        )
+
+        
+        
+        if (self.rope is not None) and (token_position is not None):
+            Q = self.rope(Q, token_position)
+            K = self.rope(K, token_position)
+
+        QKV = scaled_dot_product_attention(Q,K,V,mask)
+        QKV_reshape = rearrange(
+            QKV,
+            "... num_heads seq d_v -> ... seq (num_heads d_v)"
+        )
+        attention = self.W_O(QKV_reshape)
+        return attention
+
+

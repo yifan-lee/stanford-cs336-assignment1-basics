@@ -16,7 +16,9 @@ from cs336_basics.transformer import (
     RMSNorm,
     SwiGLU,
     RotaryPositionalEmbedding,
-    softmax
+    softmax,
+    scaled_dot_product_attention,
+    MultiheadSelfAttention
 )
 
 
@@ -123,7 +125,7 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    return scaled_dot_product_attention(Q,K,V,mask)
 
 
 def run_multihead_self_attention(
@@ -157,7 +159,12 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    model = MultiheadSelfAttention(d_model,num_heads)
+    model.W_Q.load_state_dict({"weights":q_proj_weight})
+    model.W_K.load_state_dict({"weights":k_proj_weight})
+    model.W_V.load_state_dict({"weights":v_proj_weight})
+    model.W_O.load_state_dict({"weights":o_proj_weight})
+    return model(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -197,7 +204,12 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    model = MultiheadSelfAttention(d_model,num_heads,theta,max_seq_len)
+    model.W_Q.load_state_dict({"weights":q_proj_weight})
+    model.W_K.load_state_dict({"weights":k_proj_weight})
+    model.W_V.load_state_dict({"weights":v_proj_weight})
+    model.W_O.load_state_dict({"weights":o_proj_weight})
+    return model(in_features,token_positions)
 
 
 def run_rope(
