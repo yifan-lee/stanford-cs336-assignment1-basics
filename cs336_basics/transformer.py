@@ -341,7 +341,6 @@ class TransformerLM(nn.Module):
         d_ff: int,
         eps: float = 1e-5, 
         theta: float|None=None,
-        max_seq_len:int|None=None,
         device: torch.device | None = None, 
         dtype: torch.dtype | None = None
     ):
@@ -354,7 +353,6 @@ class TransformerLM(nn.Module):
         self.d_ff = d_ff
         self.eps = eps
         self.theta = theta
-        self.max_seq_len = max_seq_len
         self.device = device
         self.dtype = dtype
 
