@@ -19,7 +19,8 @@ from cs336_basics.transformer import (
     softmax,
     scaled_dot_product_attention,
     MultiheadSelfAttention,
-    Transformer
+    TransformerBlock,
+    TransformerLM
 )
 
 
@@ -306,7 +307,7 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    model = Transformer(
+    model = TransformerBlock(
         d_model=d_model,
         num_heads=num_heads,
         d_ff=d_ff,
@@ -404,8 +405,40 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        num_layers=num_layers,
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        theta=rope_theta
+    )
+    model.embedding.load_state_dict({'weights': weights['token_embeddings.weight']})
+    for i, block in enumerate(model.transformer_blocks):
+        block.multihead_attention.W_Q.load_state_dict({"weights": weights[f"layers.{i}.attn.q_proj.weight"]})
+        block.multihead_attention.W_K.load_state_dict({"weights": weights[f"layers.{i}.attn.k_proj.weight"]})
+        block.multihead_attention.W_V.load_state_dict({"weights": weights[f"layers.{i}.attn.v_proj.weight"]})
+        block.multihead_attention.W_O.load_state_dict({"weights": weights[f"layers.{i}.attn.output_proj.weight"]})
 
+        block.swi_glu.w1_weight.load_state_dict({"weights": weights[f"layers.{i}.ffn.w1.weight"]})
+        block.swi_glu.w2_weight.load_state_dict({"weights": weights[f"layers.{i}.ffn.w2.weight"]})
+        block.swi_glu.w3_weight.load_state_dict({"weights": weights[f"layers.{i}.ffn.w3.weight"]})
+
+        block.rms_norm1.load_state_dict({"weights": weights[f"layers.{i}.ln1.weight"]})
+        block.rms_norm2.load_state_dict({"weights": weights[f"layers.{i}.ln2.weight"]})
+    model.rms_norm.load_state_dict({'weights': weights['ln_final.weight']})
+    model.linear.load_state_dict({'weights': weights['lm_head.weight']})
+    
+    # Check for biases and load if present (though assignment spec implies weights only, best to be safe)
+    # The linear layer in our implementation has bias=False by default (from Linear implementation details not shown but assumed standard for this assignment),
+    # but if the state dict has them, we should load them. 
+    # However, our Linear implementation likely only has 'weights' parameter if it followed the previous pattern.
+    # Let's check if the standard implementation expects biases.
+    # Based on failures, it's possible we missed some weights or loaded them wrong.
+    # Double check loading of all params.
+    
+    return model(in_indices)
 
 def run_rmsnorm(
     d_model: int,

@@ -274,8 +274,8 @@ class MultiheadSelfAttention(nn.Module):
         if (self.rope is not None):
             if token_position is None:
                 token_position = torch.arange(seq_len, device=self.device)
-                position_expend_shape = (Q.shape[:-1])
-                token_position = token_position.expand(position_expend_shape)
+                # position_expend_shape = (Q.shape[:-1])
+                # token_position = token_position.expand(position_expend_shape)
             Q = self.rope(Q, token_position)
             K = self.rope(K, token_position)
 
@@ -288,7 +288,7 @@ class MultiheadSelfAttention(nn.Module):
         return attention
 
 
-class Transformer(nn.Module):
+class TransformerBlock(nn.Module):
     def __init__(
         self, 
         d_model: int, 
@@ -329,3 +329,62 @@ class Transformer(nn.Module):
         x3 = x2 + x2_glu
         return x3
 
+
+class TransformerLM(nn.Module):
+    def __init__(
+        self, 
+        vocab_size: int,
+        context_length: int,
+        num_layers: int,
+        d_model: int, 
+        num_heads: int, 
+        d_ff: int,
+        eps: float = 1e-5, 
+        theta: float|None=None,
+        max_seq_len:int|None=None,
+        device: torch.device | None = None, 
+        dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.eps = eps
+        self.theta = theta
+        self.max_seq_len = max_seq_len
+        self.device = device
+        self.dtype = dtype
+
+        self.embedding = Embedding(
+            num_embeddings = vocab_size,
+            embedding_dim = d_model,
+            device=device, dtype=dtype
+        )
+        self.transformer_blocks = nn.ModuleList([
+            TransformerBlock(
+                d_model=d_model,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                theta=theta,
+                max_seq_len=context_length,
+                device=device,
+                dtype=dtype
+            )
+            for _ in range(num_layers)
+        ])
+        self.rms_norm = RMSNorm(d_model,eps,device,dtype)
+        self.linear = Linear(d_model,vocab_size,device,dtype)
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> torch.Tensor:
+        x_embedded = self.embedding(x)
+        for block in self.transformer_blocks:
+            x_embedded = block(x_embedded)
+        x_norm = self.rms_norm(x_embedded)
+        x_linear = self.linear(x_norm)
+        # result = softmax(x_linear, dimension=-1)
+        return x_linear
