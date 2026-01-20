@@ -429,15 +429,6 @@ def run_transformer_lm(
         block.rms_norm2.load_state_dict({"weights": weights[f"layers.{i}.ln2.weight"]})
     model.rms_norm.load_state_dict({'weights': weights['ln_final.weight']})
     model.linear.load_state_dict({'weights': weights['lm_head.weight']})
-    
-    # Check for biases and load if present (though assignment spec implies weights only, best to be safe)
-    # The linear layer in our implementation has bias=False by default (from Linear implementation details not shown but assumed standard for this assignment),
-    # but if the state dict has them, we should load them. 
-    # However, our Linear implementation likely only has 'weights' parameter if it followed the previous pattern.
-    # Let's check if the standard implementation expects biases.
-    # Based on failures, it's possible we missed some weights or loaded them wrong.
-    # Double check loading of all params.
-    
     return model(in_indices)
 
 def run_rmsnorm(
