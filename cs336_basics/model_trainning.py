@@ -86,3 +86,18 @@ class AdamW(torch.optim.Optimizer):
                 if weight_decay != 0:
                     p.data = p.data-lr*weight_decay*p.data
         return loss
+
+def learning_rate_schedule(
+    t: int,
+    alpha_max: float,
+    alpha_min: float,
+    T_w: int,
+    T_c: int
+):
+    if t<T_w:
+        alpha_t = t*alpha_max/T_w
+    elif t<= T_c:
+        alpha_t = alpha_min + (alpha_max-alpha_min)*(1+math.cos((t-T_w)*math.pi/(T_c-T_w)))/2 
+    else:
+        alpha_t = alpha_min
+    return alpha_t 
