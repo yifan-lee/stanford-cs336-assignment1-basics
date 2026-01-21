@@ -25,6 +25,7 @@ from cs336_basics.transformer import (
 
 from cs336_basics.model_trainning import (
     cross_entropy,
+    AdamW
 )
 
 
@@ -548,7 +549,7 @@ def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
+    return AdamW
 
 
 def run_get_lr_cosine_schedule(
@@ -673,3 +674,5 @@ def run_train_bpe(
 
     vocab, merges = train_bpe(str(input_path), vocab_size, special_tokens)
     return vocab, merges
+
+
