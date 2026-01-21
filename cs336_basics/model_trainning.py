@@ -101,3 +101,24 @@ def learning_rate_schedule(
     else:
         alpha_t = alpha_min
     return alpha_t 
+
+
+def gradient_clipping(
+    parameters,
+    max_norm: float,
+    eps = 1e-6
+):
+    grads = [p.grad for p in parameters if p.grad is not None]
+    if len(grads) == 0:
+        return
+
+    total_norm = torch.norm(
+        torch.stack([torch.norm(g, 2) for g in grads]), 
+        2
+    )
+
+    clip_coef = max_norm / (total_norm + eps)
+
+    if clip_coef < 1.0:
+        for g in grads:
+            g.mul_(clip_coef)
